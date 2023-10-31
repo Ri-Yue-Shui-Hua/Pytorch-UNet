@@ -15,6 +15,7 @@ from unet import SCN
 from utils.SpineDataSet import SpineDataset
 from PIL import Image
 import pandas as pd
+import matplotlib.pyplot as plt
 
 
 def get_files(path, suffix):
@@ -97,23 +98,16 @@ def save_to_csv(bbox_info, csv_name):
     pd.DataFrame.from_dict(bbox_info).to_csv(csv_name, index=False)
 
 
-if __name__ == "__main__":
-    dir_img = Path("E:/Dataset/Spine/Landmark/pngs")
-    dir_mask = Path("E:/Dataset/Spine/Landmark/labels")
-    # dir_img = Path('/home/jmed/wmz/DataSet/Spine2D/Landmark/pngs/')
-    # dir_mask = Path('/home/jmed/wmz/DataSet/Spine2D/Landmark/labels/')
-    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logging.info(f'Using device {device}')
-    net = SCN(in_channels=1, num_classes=25, spatial_act="sigmoid")
-    net.to(device=device)
-    checkpoint_model = "checkpoint_epoch422.pth"
-    net.load_state_dict(torch.load(checkpoint_model, map_location=device))
-    logging.info(f'Model loaded from {checkpoint_model}')
-    png_suffix = "_RL.png"
-    txt_suffix = "_RL.txt"
-    file_list = get_files(dir_img, png_suffix)
-    thresh = 0.4
+def draw_precision_recall(recall, precision):
+    plt.plot(precision, recall, "or-", label="recall")
+    plt.xlabel("precision")
+    plt.legend()
+    plt.grid(1)
+    plt.savefig('PR.png')
+    plt.show()
+
+
+def statistic_thresh_recall_precision(net, device, thresh, file_list, png_suffix, txt_suffix):
     all_tp = 0
     all_gtnum = 0
     all_prenum = 0
@@ -128,9 +122,9 @@ if __name__ == "__main__":
         img = Image.open(filename)
 
         masks = predict_img(net=net,
-                           full_img=img,
+                            full_img=img,
                             device=device,
-                           scale_factor=1.0)
+                            scale_factor=1.0)
         channels = masks.shape[0]
         ijkLandmarks = []
         for i in range(channels):
@@ -170,6 +164,45 @@ if __name__ == "__main__":
     metric_info.setdefault(csv_header[-1], gt_class_list)
     csv_file = f"test_model_{thresh}.csv"
     save_to_csv(metric_info, csv_file)
+    return all_recall, all_precision, all_tp, all_gtnum, all_prenum
+
+
+if __name__ == "__main__":
+    dir_img = Path("E:/Dataset/Spine/Landmark/pngs")
+    dir_mask = Path("E:/Dataset/Spine/Landmark/labels")
+    # dir_img = Path('/home/jmed/wmz/DataSet/Spine2D/Landmark/pngs/')
+    # dir_mask = Path('/home/jmed/wmz/DataSet/Spine2D/Landmark/labels/')
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    logging.info(f'Using device {device}')
+    net = SCN(in_channels=1, num_classes=25, spatial_act="leaky")
+    net.to(device=device)
+    checkpoint_model = "checkpoint_epoch422.pth"
+    net.load_state_dict(torch.load(checkpoint_model, map_location=device))
+    logging.info(f'Model loaded from {checkpoint_model}')
+    png_suffix = "_RL.png"
+    txt_suffix = "_RL.txt"
+    file_list = get_files(dir_img, png_suffix)
+    thresh_list = [0.2, 0.3, 0.4, 0.5, 0.6]
+    metric_list = []
+    for thresh in thresh_list:
+        recall, precision, tp, gt, pre = statistic_thresh_recall_precision(net, device, thresh, file_list, png_suffix,
+                                                                           txt_suffix)
+        metric_list.append([recall, precision, tp, gt, pre])
+    recall_list = [metric[0] for metric in metric_list]
+    precision_list = [metric[1] for metric in metric_list]
+    draw_precision_recall(recall_list, precision_list)
+    csv_header = ['thresh', 'recall', 'precision', 'tp', 'gtnum', 'prenum']
+    statistic_thresh_info = {}
+    statistic_thresh_info.setdefault(csv_header[0], thresh_list)
+    metric_info_arr = np.array(metric_list)
+    for idx in range(1, len(csv_header)):
+        statistic_thresh_info.setdefault(csv_header[idx], metric_info_arr[:, idx - 1])
+    csv_file = f"thresh_PR.csv"
+    save_to_csv(statistic_thresh_info, csv_file)
+
+
+
 
 
 
