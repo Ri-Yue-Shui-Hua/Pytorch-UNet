@@ -1,64 +1,57 @@
 import argparse
 import logging
 import os
+import cv2 as cv
 
 import numpy as np
 import torch
+from os.path import splitext
 import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms
-
-from utils.data_loading import BasicDataset
 from unet import UNet
+from unet import SCN
+from utils.SpineDataSet import SpineDataset
 from utils.utils import plot_img_and_mask
+import matplotlib.pyplot as plt
+
+
+def visualize_locate(image_path, point_list, thickness=4, point_color=(0, 0, 255)):
+    if len(point_list) == 0:
+        return
+    image = cv.imread(image_path)
+    point_size = 1
+    # point_color BGR
+    # thickness可以为 0 、4、8
+    for point in point_list:
+        cv.circle(image, point, point_size, point_color, thickness)
+
+    cv.namedWindow("image", 0)
+    cv.imshow('image', image)
+    cv.waitKey()
+    cv.destroyAllWindows()
+
+
+def realign_img(img_arr, w, h):
+    return img_arr[:, :h, :w]
+
 
 def predict_img(net,
                 full_img,
                 device,
-                scale_factor=1,
-                out_threshold=0.5):
+                scale_factor=1):
     net.eval()
-    img = torch.from_numpy(BasicDataset.preprocess(full_img, scale_factor, is_mask=False))
+    w, h = full_img.size
+    img = torch.from_numpy(SpineDataset.preprocess(full_img, scale_factor, is_mask=False))
     img = img.unsqueeze(0)
     img = img.to(device=device, dtype=torch.float32)
 
     with torch.no_grad():
-        output = net(img)
+        heatmap, HLA, HSC = net(img)
+        channel_pred = realign_img(heatmap[0], w, h)
+        pred_img = channel_pred.cpu().numpy()
 
-        if net.n_classes > 1:
-            probs = F.softmax(output, dim=1)[0]
-        else:
-            probs = torch.sigmoid(output)[0]
-
-        tf = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.Resize((full_img.size[1], full_img.size[0])),
-            transforms.ToTensor()
-        ])
-
-        full_mask = tf(probs.cpu()).squeeze()
-
-    if net.n_classes == 1:
-        return (full_mask > out_threshold).numpy()
-    else:
-        return F.one_hot(full_mask.argmax(dim=0), net.n_classes).permute(2, 0, 1).numpy()
-
-
-def get_args():
-    parser = argparse.ArgumentParser(description='Predict masks from input images')
-    parser.add_argument('--model', '-m', default='MODEL.pth', metavar='FILE',
-                        help='Specify the file in which the model is stored')
-    parser.add_argument('--input', '-i', metavar='INPUT', nargs='+', help='Filenames of input images', required=True)
-    parser.add_argument('--output', '-o', metavar='INPUT', nargs='+', help='Filenames of output images')
-    parser.add_argument('--viz', '-v', action='store_true',
-                        help='Visualize the images as they are processed')
-    parser.add_argument('--no-save', '-n', action='store_true', help='Do not save the output masks')
-    parser.add_argument('--mask-threshold', '-t', type=float, default=0.5,
-                        help='Minimum probability value to consider a mask pixel white')
-    parser.add_argument('--scale', '-s', type=float, default=0.5,
-                        help='Scale factor for the input images')
-
-    return parser.parse_args()
+    return pred_img
 
 
 def get_output_filenames(args):
@@ -76,38 +69,87 @@ def mask_to_image(mask: np.ndarray):
         return Image.fromarray((np.argmax(mask, axis=0) * 255 / mask.shape[0]).astype(np.uint8))
 
 
+def load_label_txt(filename, w, h):
+    ext = splitext(filename)[1]
+    coord_list = []
+    if ext in ['.txt']:
+        with open(filename, "r", encoding='utf-8') as f:  # 打开文本
+            for data in f.readlines():
+                substr = data.replace("\n", "").split(" ")
+                c, x, y = substr
+                coord = [int(c), float(x)*w, float(y)*h]
+                coord_list.append(coord)
+        return coord_list
+
+
+def visualize_predict(masks, file_name, thresh):
+    channels = masks.shape[0]
+    point_list = []
+    for i in range(channels):
+        max_value = np.max(masks[i, :, :])
+        print(i+1, max_value)
+        if max_value > thresh:
+            y, x = np.where(masks[i, :, :] == max_value)
+            # print(x, y)
+            point_list.append([int(x.mean()), int(y.mean())])
+    visualize_locate(file_name, point_list)
+    return point_list
+
+
+def plot_channel_max(maxAP_value, maxRL_value=None):
+    class_idx = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    plt.plot(class_idx, maxAP_value, "ob-", label="RL")
+    # plt.plot(class_idx, maxRL_value, "or-", label="RL")
+    plt.xlabel("cls_idx")
+    x_ticks = np.arange(0, 26, 1)
+    plt.xticks(x_ticks)
+    plt.legend()
+    plt.grid(1)
+    plt.show()
+
+
 if __name__ == '__main__':
-    args = get_args()
-    in_files = args.input
-    out_files = get_output_filenames(args)
+    model = "checkpoint_epoch2500.pth"
+    scale = 1.0
+    # in_files = ["E:/Dataset/Vesta/Landmark/pngs/verse278_RL.png"]
+    in_files = ["E:/Dataset/Vesta/Landmark/pngs/JQR_RL.png"]
 
-    net = UNet(n_channels=3, n_classes=2)
-
+    net = SCN(in_channels=1, num_classes=25, spatial_act="sigmoid")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logging.info(f'Loading model {args.model}')
-    logging.info(f'Using device {device}')
-
     net.to(device=device)
-    net.load_state_dict(torch.load(args.model, map_location=device))
-
-    logging.info('Model loaded!')
+    net.load_state_dict(torch.load(model, map_location=device))
+    thresh = 0.4
 
     for i, filename in enumerate(in_files):
         logging.info(f'\nPredicting image {filename} ...')
         img = Image.open(filename)
 
-        mask = predict_img(net=net,
+        masks = predict_img(net=net,
                            full_img=img,
-                           scale_factor=args.scale,
-                           out_threshold=args.mask_threshold,
-                           device=device)
+                            device=device,
+                           scale_factor=scale)
+        channels = masks.shape[0]
+        max_value_list = []
+        for i in range(channels):
+            max_value = np.max(masks[i, :, :])
+            max_value_list.append(max_value)
+        plot_channel_max(max_value_list)
 
-        if not args.no_save:
-            out_filename = out_files[i]
-            result = mask_to_image(mask)
-            result.save(out_filename)
-            logging.info(f'Mask saved to {out_filename}')
+        w, h = img.size
+        label_file = filename.replace("pngs", "labels").replace(".png", ".txt")
+        gtijLandmarks = load_label_txt(label_file, w, h)
+        gtijLandmarks = [[int(landmark[1]), int(landmark[2])] for landmark in gtijLandmarks]
+        visualize_locate(filename, gtijLandmarks, point_color=(255, 0, 0))
+        pred_landmarks = visualize_predict(masks, filename, thresh)
 
-        if args.viz:
-            logging.info(f'Visualizing results for image {filename}, close to continue...')
-            plot_img_and_mask(img, mask)
+        exit(0)
+        # if not args.no_save:
+        #     for id in range(net.n_classes):
+        #         out_filename = out_files + f"ch_{id}.png"
+        #         result = mask_to_image(masks[id])
+        #         result.save(out_filename)
+        #         logging.info(f'Mask saved to {out_filename}')
+
+        # if args.viz:
+        #     logging.info(f'Visualizing results for image {filename}, close to continue...')
+        #     plot_img_and_mask(img, masks)
