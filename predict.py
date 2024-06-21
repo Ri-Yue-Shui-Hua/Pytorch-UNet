@@ -109,16 +109,17 @@ def plot_channel_max(maxAP_value, maxRL_value=None):
 
 
 if __name__ == '__main__':
-    model = "checkpoint_epoch2500.pth"
+    model = "checkpoint_epoch90.pth"
     scale = 1.0
-    # in_files = ["E:/Dataset/Vesta/Landmark/pngs/verse278_RL.png"]
-    in_files = ["E:/Dataset/Vesta/Landmark/pngs/JQR_RL.png"]
+    # in_files = ["E:/Dataset/Vesta/Landmark/pngs/verse259_RL.png"]
+    # in_files = ["E:/Dataset/Vesta/Landmark/pngs/JQR_RL.png"]
+    in_files = ["E:/Dataset/Spine/Landmark/pngs/sub-verse004_ct_AP.png"]
 
     net = SCN(in_channels=1, num_classes=25, spatial_act="sigmoid")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     net.to(device=device)
     net.load_state_dict(torch.load(model, map_location=device))
-    thresh = 0.4
+    thresh = 0.2
 
     for i, filename in enumerate(in_files):
         logging.info(f'\nPredicting image {filename} ...')
@@ -139,7 +140,7 @@ if __name__ == '__main__':
         label_file = filename.replace("pngs", "labels").replace(".png", ".txt")
         gtijLandmarks = load_label_txt(label_file, w, h)
         gtijLandmarks = [[int(landmark[1]), int(landmark[2])] for landmark in gtijLandmarks]
-        visualize_locate(filename, gtijLandmarks, point_color=(255, 0, 0))
+        visualize_locate(filename, gtijLandmarks, point_color=(0, 255, 255))
         pred_landmarks = visualize_predict(masks, filename, thresh)
 
         exit(0)

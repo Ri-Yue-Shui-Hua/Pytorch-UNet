@@ -42,7 +42,7 @@ class SpineDataset(Dataset):
         if img_ndarray.ndim == 2 and not is_mask:
             img_ndarray = img_ndarray[np.newaxis, ...]
         elif not is_mask:
-            img_ndarray = img_ndarray.transpose((2, 0, 1))
+            img_ndarray = img_ndarray.transpose((2, 0, 1))  # ensure channel，height, width order
 
         if not is_mask:
             img_ndarray = img_ndarray / 255

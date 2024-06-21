@@ -19,10 +19,10 @@ from evaluate import evaluate
 from unet import SCN
 
 
-# dir_img = Path("E:/Dataset/Vesta/Landmark/pngs")
-# dir_mask = Path("E:/Dataset/Vesta/Landmark/labels")
-dir_img = Path('/home/jmed/wmz/DataSet/Spine2D/Landmark/pngs/')
-dir_mask = Path('/home/jmed/wmz/DataSet/Spine2D/Landmark/labels/')
+dir_img = Path("E:/Dataset/Vesta/Landmark/pngs")
+dir_mask = Path("E:/Dataset/Vesta/Landmark/labels")
+# dir_img = Path('/home/jmed/wmz/DataSet/Spine2D/Landmark/pngs/')
+# dir_mask = Path('/home/jmed/wmz/DataSet/Spine2D/Landmark/labels/')
 dir_checkpoint = Path('./checkpoints/')
 
 
@@ -72,7 +72,7 @@ def train_net(net,
     for epoch in range(epochs):
         net.train()
         epoch_loss = 0
-        with tqdm(total=n_train, desc=f'Epoch {  + 1}/{epochs}', unit='img') as pbar:
+        with tqdm(total=n_train, desc=f'Epoch {epoch + 1}/{epochs}', unit='img') as pbar:
             for batch in train_loader:
                 images = batch['image']
                 true_masks = batch['heatmap']
